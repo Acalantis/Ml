@@ -12,7 +12,7 @@ def processar_vendas_ml(file_vendas, mes):
         df_vendas.dropna(axis=1, how='all', inplace=True)
         df_vendas.columns = df_vendas.columns.str.strip()
 
-        # Colunas obrigatórias atualizadas
+        # Colunas obrigatórias
         required_columns = [
             'Estado',
             'Tarifa de venda e impostos (BRL)',
@@ -28,58 +28,114 @@ def processar_vendas_ml(file_vendas, mes):
         df_vendas['Estado'] = df_vendas['Estado'].astype(str).str.strip().str.lower()
         df_vendas['Forma de entrega'] = df_vendas['Forma de entrega'].astype(str).str.strip().str.lower()
 
-        # Cancelados
+        # ---------------- CANCELADOS ----------------
         df_cancelados = df_vendas[df_vendas['Estado'].str.contains(r'cancelad[oa]|cancelou', regex=True, na=False)]
-        df_cancelados['Tarifa de venda e impostos (BRL)'] = pd.to_numeric(df_cancelados['Tarifa de venda e impostos (BRL)'], errors='coerce')
+        df_cancelados['Tarifa de venda e impostos (BRL)'] = pd.to_numeric(
+            df_cancelados['Tarifa de venda e impostos (BRL)'], errors='coerce'
+        )
         total_comissao_cancelados = df_cancelados['Tarifa de venda e impostos (BRL)'].sum()
 
-        # Devoluções
+        # ---------------- DEVOLUÇÕES (OPERACIONAL - ORIGINAL) ----------------
         df_devolucoes = df_vendas[df_vendas['Estado'].str.contains(r'devoluç|devolvid[oa]', regex=True, na=False)]
-        df_devolucoes['Receita por produtos (BRL)'] = pd.to_numeric(df_devolucoes['Receita por produtos (BRL)'], errors='coerce')
+        df_devolucoes['Receita por produtos (BRL)'] = pd.to_numeric(
+            df_devolucoes['Receita por produtos (BRL)'], errors='coerce'
+        )
         total_devolucoes = df_devolucoes['Receita por produtos (BRL)'].sum()
 
-        # Faturamento (sem cancelados)
-        df_faturamento = df_vendas[~df_vendas['Estado'].str.contains(r'cancelad[oa]|cancelou', regex=True, na=False)]
-        df_faturamento['Receita por produtos (BRL)'] = pd.to_numeric(df_faturamento['Receita por produtos (BRL)'], errors='coerce')
+        # ---------------- REEMBOLSOS DE CAIXA (NOVO - SEM MEXER NO ORIGINAL) ----------------
+        df_reembolsos_caixa = df_vendas[
+            df_vendas['Estado'].str.contains('te demos o dinheiro', na=False)
+        ]
+
+        df_reembolsos_caixa['Receita por produtos (BRL)'] = pd.to_numeric(
+            df_reembolsos_caixa['Receita por produtos (BRL)'], errors='coerce'
+        )
+
+        total_reembolsos_caixa = df_reembolsos_caixa['Receita por produtos (BRL)'].sum()
+        qtd_reembolsos_caixa = len(df_reembolsos_caixa)
+
+        # ---------------- FATURAMENTO (SEM CANCELADOS) ----------------
+        df_faturamento = df_vendas[
+            ~df_vendas['Estado'].str.contains(r'cancelad[oa]|cancelou', regex=True, na=False)
+        ]
+        df_faturamento['Receita por produtos (BRL)'] = pd.to_numeric(
+            df_faturamento['Receita por produtos (BRL)'], errors='coerce'
+        )
         total_faturamento = df_faturamento['Receita por produtos (BRL)'].sum()
 
-        # Flex
+        # ---------------- FLEX ----------------
         df_flex = df_vendas[
             (df_vendas['Forma de entrega'].str.contains(r'mercado envios flex', regex=True, na=False)) & 
             ~df_vendas['Estado'].str.contains(r'cancelad[oa]|cancelou', regex=True, na=False)
         ]
-        df_flex['Receita por envio (BRL)'] = pd.to_numeric(df_flex['Receita por envio (BRL)'], errors='coerce')
+        df_flex['Receita por envio (BRL)'] = pd.to_numeric(
+            df_flex['Receita por envio (BRL)'], errors='coerce'
+        )
         total_flex = df_flex['Receita por envio (BRL)'].sum()
 
-        # Frete
-        df_frete = df_vendas[df_vendas['Forma de entrega'].str.contains(r'mercado envios full|correios|pontos de envio', regex=True, na=False)]
-        df_frete['Receita por envio (BRL)'] = pd.to_numeric(df_frete['Receita por envio (BRL)'], errors='coerce')
-        df_frete['Tarifas de envio (BRL)'] = pd.to_numeric(df_frete['Tarifas de envio (BRL)'], errors='coerce')
+        # ---------------- FRETE ----------------
+        df_frete = df_vendas[
+            df_vendas['Forma de entrega'].str.contains(
+                r'mercado envios full|correios|pontos de envio', regex=True, na=False
+            )
+        ]
+        df_frete['Receita por envio (BRL)'] = pd.to_numeric(
+            df_frete['Receita por envio (BRL)'], errors='coerce'
+        )
+        df_frete['Tarifas de envio (BRL)'] = pd.to_numeric(
+            df_frete['Tarifas de envio (BRL)'], errors='coerce'
+        )
         total_receita_envio = df_frete['Receita por envio (BRL)'].sum()
         total_tarifas_envio = df_frete['Tarifas de envio (BRL)'].sum()
 
-        # Exporta
+        # ---------------- EXPORTAÇÃO ----------------
         output_dir = 'uploads'
         os.makedirs(output_dir, exist_ok=True)
         output_filepath = os.path.join(output_dir, f"Relatorio_MercadoLivre_{mes}.xlsx")
 
         with pd.ExcelWriter(output_filepath, engine='openpyxl') as writer:
-            pd.DataFrame({'Mês': [mes], 'Comissão Cancelados (BRL)': [total_comissao_cancelados]}).to_excel(writer, sheet_name='Comissão Cancelados', index=False)
-            pd.DataFrame({'Mês': [mes], 'Faturamento Total (BRL)': [total_faturamento]}).to_excel(writer, sheet_name='Faturamento Total', index=False)
-            pd.DataFrame({'Mês': [mes], 'Total Devoluções (BRL)': [total_devolucoes]}).to_excel(writer, sheet_name='Devoluções', index=False)
-            pd.DataFrame({'Mês': [mes], 'Total Flex (BRL)': [total_flex]}).to_excel(writer, sheet_name='Flex', index=False)
-            df_frete_resumo = pd.DataFrame({
+            pd.DataFrame({
+                'Mês': [mes],
+                'Comissão Cancelados (BRL)': [total_comissao_cancelados]
+            }).to_excel(writer, sheet_name='Comissão Cancelados', index=False)
+
+            pd.DataFrame({
+                'Mês': [mes],
+                'Faturamento Total (BRL)': [total_faturamento]
+            }).to_excel(writer, sheet_name='Faturamento Total', index=False)
+
+            pd.DataFrame({
+                'Mês': [mes],
+                'Total Devoluções (BRL)': [total_devolucoes]
+            }).to_excel(writer, sheet_name='Devoluções', index=False)
+
+            # NOVA ABA (SEM IMPACTAR AS OUTRAS)
+            pd.DataFrame({
+                'Mês': [mes],
+                'Valor reembolsado (BRL)': [total_reembolsos_caixa],
+                'Quantidade de registros': [qtd_reembolsos_caixa]
+            }).to_excel(writer, sheet_name='Reembolsos Caixa ML', index=False)
+
+            pd.DataFrame({
+                'Mês': [mes],
+                'Total Flex (BRL)': [total_flex]
+            }).to_excel(writer, sheet_name='Flex', index=False)
+
+            pd.DataFrame({
                 'Mês': [mes],
                 'Receita por envio (BRL)': [total_receita_envio],
                 'Tarifas de envio (BRL)': [total_tarifas_envio]
-            })
-            df_frete_resumo.to_excel(writer, sheet_name='Frete', index=False)
+            }).to_excel(writer, sheet_name='Frete', index=False)
 
         return output_filepath
+
     except Exception as e:
         return f"Erro ao processar as vendas do Mercado Livre: {e}"
 
 
+# =========================================================
+# MERCADO PAGO (INALTERADO)
+# =========================================================
 def processar_planilhas_pago(files_pago, mes):
     output_dir = 'uploads'
     os.makedirs(output_dir, exist_ok=True)
@@ -100,7 +156,6 @@ def processar_planilhas_pago(files_pago, mes):
     df_merged.columns = df_merged.columns.astype(str)
 
     possible_date_columns = [col for col in df_merged.columns if "data da tarifa" in col]
-
     if not possible_date_columns:
         return "Erro: A coluna 'Data da tarifa' não foi encontrada nas planilhas."
 
@@ -140,7 +195,11 @@ def main():
     mes_numero = meses_dict[st.selectbox("📅 Selecione o mês:", list(meses_dict.keys()))]
 
     st.header("📌 Planilhas de Mercado Pago")
-    files_pago = st.file_uploader("🔽 Envie as Planilhas de Mercado Pago", type=["xls", "xlsx"], accept_multiple_files=True)
+    files_pago = st.file_uploader(
+        "🔽 Envie as Planilhas de Mercado Pago",
+        type=["xls", "xlsx"],
+        accept_multiple_files=True
+    )
 
     if st.button("📊 Gerar Relatório Mercado Pago"):
         if files_pago:
@@ -158,7 +217,10 @@ def main():
                 st.error(output_pago)
 
     st.header("📌 Planilha de Vendas Mercado Livre")
-    file_vendas = st.file_uploader("🔽 Envie a Planilha de Vendas Mercado Livre", type=["xls", "xlsx"])
+    file_vendas = st.file_uploader(
+        "🔽 Envie a Planilha de Vendas Mercado Livre",
+        type=["xls", "xlsx"]
+    )
 
     if st.button("📊 Gerar Relatório Mercado Livre"):
         if file_vendas:
